@@ -1,4 +1,15 @@
 /** Japanese product copy. Saved user tasks and logs are not translation inputs. */
+export const JA_PROJECT_IMPORT_COPY = Object.freeze({
+  entry: "＋ プロジェクトを読み込む", title: "ローカルプロジェクトを読み込む", path: "この端末の絶対ディレクトリパス", placeholder: "絶対ディレクトリパスを入力",
+  help: "既存プロジェクトを一覧に登録するだけです。コピー、初期化、インストール、タスク開始は行いません。Agent の実行ディレクトリも変更しません。",
+  unavailable: "この接続ではプロジェクトの読み込みが許可されていません。書き込み権限のあるローカルワークスペースが必要です。",
+  check: "確認", checking: "確認中…", confirm: "読み込んで開く", open: "プロジェクトを開く", confirming: "登録を確認中…", refreshing: "一覧を更新中…", retryOpen: "一覧を更新して開く", retryUnknown: "結果を確認して安全に再試行", cancel: "キャンセル",
+  name: "プロジェクト名", canonicalPath: "正規化パス", evidence: "ガバナンス記録数", registration: "登録状態", ready: "未登録・読み込み可能", registered: "登録済み",
+  skipped: "このプロジェクトは以前、一覧から除外されました。再登録する場合のみ選択してください。", skippedConsent: "このプロジェクトを再登録する",
+  importedPending: "読み込みは完了しましたが、一覧を更新できませんでした。再登録せずに更新して開けます。", unknown: "登録結果を確認できません。まず一覧を確認し、必要な場合だけ同じ確認トークンで再試行します。",
+  invalidPath: "この端末の絶対ディレクトリパスを入力してください。", pathUnavailable: "ディレクトリを読み取れません。存在とアクセス権を確認してください。", notGoverned: "このディレクトリには読み取り可能な Meta_Kim ガバナンス記録がありません。",
+  expired: "確認の有効期限が切れました。もう一度確認してください。", stale: "確認後にプロジェクトの記録が変更されました。もう一度確認してください。", skippedRequired: "以前除外したプロジェクトの再登録に同意してください。", full: "プロジェクト一覧の上限に達しています。", failed: "プロジェクトを読み込めませんでした。入力を保持しました。確認して再試行してください。", auth: "ローカルの操作権限が失効しました。ワークスペースを再接続してください。", request: "要求を受け付けられませんでした。ページを再読み込みして再確認してください。", previewNetwork: "確認サービスに接続できません。入力を保持しました。再試行してください。"
+});
 export const JA_COPY = Object.freeze({
   " / Output · ": " / 出力 · ",
   " / Total · ": " / 合計 · ",

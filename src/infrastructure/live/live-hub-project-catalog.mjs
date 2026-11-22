@@ -1359,6 +1359,7 @@ export function createLiveHubProjectCatalog(options = {}) {
 
   return {
     profile,
+    maxProjects,
     listProjects,
     resolveProject,
     listSessions,

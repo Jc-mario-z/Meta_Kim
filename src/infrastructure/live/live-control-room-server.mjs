@@ -29,6 +29,7 @@ import { renderLiveControlRoomPage } from "../../presentation/live/live-control-
 import { createLiveNativeBindings } from "./live-native-bindings.mjs";
 import { createLiveWorkspaceService } from "../../application/live/live-workspace-service.mjs";
 import { loadLiveCapabilityCatalog } from "../../application/live/live-capability-catalog.mjs";
+import { createLiveProjectImportService } from "../../application/live/live-project-import-service.mjs";
 import {
   getOrBuildPrdWorkflowCanvas,
   getPrdMockupImage,
@@ -556,6 +557,13 @@ export function createLiveControlRoomServer(options = {}) {
   let hubCatalogCache = null;
   let hubCatalogCacheExpiresAt = 0;
   let hubCatalogReadPromise = null;
+  let hubCatalogGeneration = 0;
+  const invalidateHubProjects = () => {
+    hubCatalogGeneration++;
+    hubCatalogCache = null;
+    hubCatalogCacheExpiresAt = 0;
+    hubCatalogReadPromise = null;
+  };
   const createProjectService = typeof options.createProjectService === "function"
     ? options.createProjectService
     : ({ repoRoot }) => createLiveControlRoomService({
@@ -567,6 +575,14 @@ export function createLiveControlRoomServer(options = {}) {
   const enableControl = !globalHub && options.enableControl === true;
   const workspaceEnabled = options.workspaceEnabled !== false;
   const workspaceToken = workspaceEnabled ? randomBytes(32).toString("base64url") : null;
+  const projectImportEnabled = projectCatalogEnabled && workspaceEnabled && options.enableProjectImport !== false;
+  const projectImport = projectImportEnabled ? createLiveProjectImportService({
+    homeDir: options.homeDir,
+    profile: hubProfile,
+    maxProjects: hubCatalog?.maxProjects ?? options.maxProjects,
+    seedProjectRoot: !globalHub ? options.projectRoot : null,
+    onRegistered: invalidateHubProjects,
+  }) : null;
   // An explicit local Agent application can start a native host. The regular
   // Live Hub remains a read-only observer, even when another option requests
   // the existing pause/resume control surface.
@@ -625,15 +641,20 @@ export function createLiveControlRoomServer(options = {}) {
 
   const rebuildHubProjects = () => {
     if (!hubCatalogReadPromise) {
-      hubCatalogReadPromise = Promise.resolve(hubCatalog.listProjects())
-        .then(async (projects) => {
+      const generation = hubCatalogGeneration;
+      const pending = Promise.resolve().then(() => hubCatalog.listProjects())
+        .then((projects) => {
+          // An import invalidates older in-flight walks. Their callers also join
+          // the new generation, rather than publishing the pre-import directory.
+          if (generation !== hubCatalogGeneration) return rebuildHubProjects();
           hubCatalogCache = Array.isArray(projects) ? projects : [];
           hubCatalogCacheExpiresAt = hubCatalogClock() + hubCatalogTtlMs;
           return hubCatalogCache;
         })
         .finally(() => {
-          hubCatalogReadPromise = null;
+          if (hubCatalogReadPromise === pending) hubCatalogReadPromise = null;
         });
+      hubCatalogReadPromise = pending;
     }
     return hubCatalogReadPromise;
   };
@@ -852,7 +873,8 @@ export function createLiveControlRoomServer(options = {}) {
 
   const server = createServer(async (request, response) => {
     if (!requestHasLocalAuthority(request, server)) {
-      jsonResponse(response, 403, safeError("forbidden_authority"));
+      const importRoute = ["/api/projects/import/preview", "/api/projects/import/confirm"].includes(requestUrl(request)?.pathname);
+      jsonResponse(response, 403, safeError(importRoute ? "project_import_same_origin_json_required" : "forbidden_authority"));
       return;
     }
     const parsed = requestUrl(request);
@@ -1272,6 +1294,36 @@ export function createLiveControlRoomServer(options = {}) {
       return;
     }
 
+    if (["/api/projects/import/preview", "/api/projects/import/confirm"].includes(parsed.pathname)) {
+      if (request.method !== "POST") {
+        response.setHeader("allow", "POST");
+        jsonResponse(response, 405, safeError("method_not_allowed")); return;
+      }
+      if (!projectImportEnabled) {
+        jsonResponse(response, 403, safeError("project_import_unavailable")); return;
+      }
+      if (request.headers[WORKSPACE_HEADER] !== workspaceToken) {
+        jsonResponse(response, 403, safeError("workspace_token_required")); return;
+      }
+      if (!requestHasSameOrigin(request, server) ||
+          !/^application\/json(?:\s*;|\s*$)/iu.test(String(request.headers["content-type"] || ""))) {
+        jsonResponse(response, 403, safeError("project_import_same_origin_json_required")); return;
+      }
+      const preview = parsed.pathname.endsWith("/preview");
+      try {
+        const body = await readJsonBody(request, Math.min(maxJsonBytes, 16 * 1024));
+        jsonResponse(response, 200, await (preview ? projectImport.preview(body) : projectImport.confirm(body)));
+      } catch (error) {
+        const code = /^project_import_[a-z_]+$/u.test(error?.code || "") ? error.code
+          : error?.code === "LIVE_REQUEST_BODY_INVALID" ? (preview ? "project_import_invalid_path" : "project_import_preview_expired")
+            : "project_import_failed";
+        const status = error?.code === "LIVE_REQUEST_BODY_TOO_LARGE" ? 413
+          : Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 400;
+        jsonResponse(response, status, safeError(code));
+      }
+      return;
+    }
+
     if (parsed.pathname === "/api/projects") {
       if (request.method !== "GET") {
         response.setHeader("allow", "GET");
@@ -1542,6 +1594,7 @@ export function createLiveControlRoomServer(options = {}) {
           controlHeader: WORKSPACE_HEADER,
           controlToken: workspaceToken,
           agentEntryEnabled,
+          projectImportEnabled,
         },
       });
       textResponse(response, 200, body, "text/html; charset=utf-8");

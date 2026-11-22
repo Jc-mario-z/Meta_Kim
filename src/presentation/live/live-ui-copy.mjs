@@ -3,8 +3,35 @@
  * Each pattern describes a sentence composed by the renderer; its values are
  * inserted verbatim. Unknown text is preserved, never guessed or sent away.
  */
-import { JA_COPY } from "./live-ui-copy.ja.mjs";
-import { KO_COPY } from "./live-ui-copy.ko.mjs";
+import { JA_COPY, JA_PROJECT_IMPORT_COPY } from "./live-ui-copy.ja.mjs";
+import { KO_COPY, KO_PROJECT_IMPORT_COPY } from "./live-ui-copy.ko.mjs";
+
+// Closed product vocabulary only; directory and project names never pass through it.
+export const LIVE_PROJECT_IMPORT_COPY = Object.freeze({
+  en: Object.freeze({
+    entry: "＋ Import project", title: "Import a local project", path: "Absolute directory on this device", placeholder: "Enter an absolute directory path",
+    help: "Only registers an existing project in the list. No copying, initialization, installation or task start. Does not change any Agent's bound execution directory.",
+    unavailable: "Project import is unavailable on this connection. A local workspace with explicit write capability is required.",
+    check: "Check", checking: "Checking…", confirm: "Import and open", open: "Open project", confirming: "Confirming registration…", refreshing: "Refreshing project list…", retryOpen: "Refresh list and open", retryUnknown: "Verify result and retry safely", cancel: "Cancel",
+    name: "Project name", canonicalPath: "Canonical path", evidence: "Governance record count", registration: "Registration", ready: "Not registered · ready to import", registered: "Already registered",
+    skipped: "This project was previously excluded from the list. Select the checkbox only if you want to register it again.", skippedConsent: "I agree to register this project again",
+    importedPending: "Imported, but the project list has not updated. Retry refresh and open without registering again.", unknown: "Registration result is unknown. Check the list first; retry with the same confirmation token only if needed.",
+    invalidPath: "Enter an absolute directory path on this device.", pathUnavailable: "The directory cannot be read. Check that it exists and that you have access.", notGoverned: "This directory has no readable Meta_Kim governance records.",
+    expired: "The preview has expired. Check the directory again.", stale: "Project records changed after the preview. Check the directory again.", skippedRequired: "Confirm that you want to register the previously excluded project again.", full: "The project catalog has reached its limit.", failed: "Could not import the project. Your input is preserved; check it and retry.", auth: "Local control authorization has expired. Reconnect the workspace.", request: "The request was rejected. Reload this page and check again.", previewNetwork: "Cannot reach the preview service. Your input is preserved; retry the check."
+  }),
+  zh: Object.freeze({
+    entry: "＋ 导入项目", title: "导入本机项目", path: "本机绝对目录", placeholder: "输入本机绝对目录路径",
+    help: "仅将已有项目登记到列表。不复制项目、不初始化或安装、不启动任务，也不改变 Agent 已绑定的执行目录。",
+    unavailable: "当前连接未开放项目导入。需要已明确授予写入能力的本地工作区。",
+    check: "检查", checking: "正在检查…", confirm: "导入并打开", open: "打开项目", confirming: "正在确认登记…", refreshing: "正在刷新项目列表…", retryOpen: "刷新列表并打开", retryUnknown: "核实结果并安全重试", cancel: "取消",
+    name: "项目名称", canonicalPath: "规范路径", evidence: "治理记录数量", registration: "登记状态", ready: "尚未登记 · 可以导入", registered: "已登记",
+    skipped: "这个项目曾被排除出列表。只有确实要重新登记时才勾选下方确认。", skippedConsent: "我确认重新登记这个曾被排除的项目",
+    importedPending: "已导入，列表暂未更新。可重试刷新并打开，不会再次登记。", unknown: "登记结果暂时未知。先核实项目列表，必要时仅用原确认令牌安全重试。",
+    invalidPath: "请输入本机绝对目录路径。", pathUnavailable: "目录暂时不可读取，请检查目录是否存在及访问权限。", notGoverned: "该目录没有可读取的 Meta_Kim 治理记录，不能导入。",
+    expired: "预览已过期，请重新检查目录。", stale: "预览后项目记录发生变化，请重新检查目录。", skippedRequired: "请先明确勾选是否重新登记这个曾被排除的项目。", full: "项目列表已达容量上限，暂时无法导入。", failed: "项目导入未完成。已保留输入，请核对后重试。", auth: "本地控制权限已失效，请重新连接工作区。", request: "请求未被接受，请刷新页面后重新检查。", previewNetwork: "暂时无法连接检查服务。已保留输入，可重试检查。"
+  }),
+  ja: JA_PROJECT_IMPORT_COPY, ko: KO_PROJECT_IMPORT_COPY,
+});
 
 // Canonical stage identifiers stay in the records; these are display labels.
 export const LIVE_UI_COPY = Object.freeze({

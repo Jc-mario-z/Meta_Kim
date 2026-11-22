@@ -25,6 +25,7 @@ export function renderLiveWorkspaceNavigation() {
   return `<aside class="uw-navigation" id="uw-navigation" data-uw-navigation aria-label="工作区导航">
     <div class="uw-nav-heading"><span data-uw-nav-heading-text>工作空间</span><div class="uw-nav-heading-actions"><button type="button" class="uw-icon-button uw-nav-collapse-btn" data-uw-nav-collapse title="收起侧边栏" aria-label="收起侧边栏">${liveWorkspaceIcon("sidebarLeft")}</button><button type="button" class="uw-icon-button uw-mobile-close" data-uw-nav-close aria-label="关闭导航">${liveWorkspaceIcon("close")}</button></div></div>
     <button class="uw-project-switch" type="button" data-uw-project-switch aria-label="选择仓库与运行"><span class="uw-project-avatar" aria-hidden="true">K</span><span class="uw-project-copy"><strong data-uw-project-name>选择仓库</strong><small data-uw-run-name>切换仓库与运行记录</small></span>${liveWorkspaceIcon("chevron")}</button>
+    <button class="uw-button project-import-entry" type="button" data-project-import-entry aria-describedby="project-import-availability" disabled><span data-project-import-copy="entry">＋ 导入项目</span></button>
     <nav class="uw-primary-nav" aria-label="主视图">${nav("work", "工作", "work")}${nav("prd", "PRD", "document")}${nav("repository", "仓库", "layers")}${nav("records", "记录", "history")}${nav("graph", "运行图", "graph")}</nav>
     <section class="uw-agent-inventory" data-uw-agent-inventory aria-label="Agent 协作与能力清单"></section>
     <div class="uw-nav-section-heading"><span data-uw-module-heading>系统模块</span><span data-uw-module-count>—</span></div>
@@ -40,6 +41,7 @@ export function renderLiveWorkspaceSurface() {
       <div class="uw-overview-kicker"><span data-uw-origin hidden></span><span data-uw-project-label>Meta_Kim 工作空间</span></div>
       <h1 data-uw-title>让每一步都有去向</h1>
       <p class="uw-overview-subtitle" data-uw-next>选择已有项目，查看模块、产物和接续状态。</p>
+      <div data-project-import-empty><button class="uw-button project-import-entry" type="button" data-project-import-entry aria-describedby="project-import-availability" disabled><span data-project-import-copy="entry">＋ 导入项目</span></button></div>
       <div class="uw-overview-meta"><span class="uw-status" data-uw-status>等待运行记录</span><span data-uw-update></span></div>
     </header>
     <section class="uw-agent-entry" data-uw-agent-entry aria-label="Meta_Kim Agent 对话">

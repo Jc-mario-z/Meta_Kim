@@ -9,6 +9,7 @@
 
 import { serializeLiveUiCopy } from "./live-ui-copy.mjs";
 import { serializeLiveWorkspaceClient } from "./live-workspace-client.mjs";
+import { renderLiveProjectImportPane, serializeLiveProjectImportClient } from "./live-project-import-client.mjs";
 import { LIVE_WORKSPACE_CSS } from "./live-workspace-styles.mjs";
 import { renderLiveWorkspaceNavigation, renderLiveWorkspaceSurface, renderLiveWorkspaceMobileToggle } from "./live-workspace-view.mjs";
 import { LIVE_GRAPH_AVAILABILITY_REASONS } from "../../application/live/live-control-room-service.mjs";
@@ -369,7 +370,8 @@ function normalizeWorkspaceConfig(value) {
         // The regular Live Hub is a viewer. Native Agent starts require the
         // separately launched local application and cannot be inferred from
         // the presence of an ordinary workspace review token.
-        agentEntryEnabled: value.agentEntryEnabled === true }
+        agentEntryEnabled: value.agentEntryEnabled === true,
+        projectImportEnabled: value.projectImportEnabled === true }
     : { enabled: false };
 }
 
@@ -404,6 +406,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
   ${RUN_OVERVIEW_SOURCE}
   ${TOKEN_USAGE_SOURCE}
   ${WORKSPACE_CLIENT_SOURCE}
+  ${serializeLiveProjectImportClient()}
 
   const DEFAULT_SELECTION = ${DEFAULT_SELECTION_LITERAL};
   ${DEFAULT_SELECTION_SOURCE}
@@ -425,6 +428,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
   const controlConfigElement = document.getElementById("live-control-config");
   const workspaceConfigElement = document.getElementById("live-workspace-config");
   let liveWorkspaceController = null;
+  let projectImportUi = null;
   const reducedMotion = window.matchMedia
     ? window.matchMedia("(prefers-reduced-motion: reduce)")
     : { matches: false };
@@ -786,6 +790,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
       selector.setAttribute("aria-label", currentLanguage === "zh" ? "界面语言" : localize("Interface language"));
       selector.title = currentLanguage === "zh" ? "界面语言" : localize("Interface language");
     }
+    projectImportUi?.render();
   }
 
   const connectionLabel = app.querySelector("[data-live-connection]");
@@ -973,7 +978,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
   let showUnlinkedSessions = false;
   const expandedSessionRecords = new Set();
   let catalogAvailable = false;
-  let catalogRequestInFlight = false;
+  let catalogLoader = null;
   let catalogRefreshTimer = null;
   let pollingRefreshTimer = null;
   let selectionGeneration = 0;
@@ -3632,6 +3637,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
   function setDialogOpen(dialog, open) {
     if (!dialog) return;
     const active = Boolean(open);
+    if (typeof projectImportUi !== "undefined" && ((!active && dialog === sessionsDialog) || (active && dialog !== sessionsDialog))) projectImportUi?.close();
     if (active) {
       for (const other of [sessionsDialog, helpDialog, infoDialog]) {
         if (other && other !== dialog) {
@@ -6229,9 +6235,17 @@ const CLIENT_SCRIPT = String.raw`(() => {
     if (generation === selectionGeneration) connectEvents(generation);
   }
 
-  async function applyProjectCatalog(catalog, { refresh = false } = {}) {
+  async function applyProjectCatalog(catalog, { refresh = false, catalogOnly = false } = {}) {
       catalogAvailable = true;
       projectCatalog = catalog.projects;
+      if (typeof projectImportUi !== "undefined") projectImportUi?.render();
+      // Import reconciliation may finish after cancellation or without its target.
+      // Publish the catalog, but leave all selection/navigation to the controller.
+      if (catalogOnly) {
+        populateProjectSelect();
+        populateSessionSelect();
+        return false;
+      }
       if (refresh && selectedProjectId) {
         const currentProject = projectCatalog.find((item) => item.projectId === selectedProjectId) || null;
         if (currentProject && currentProject.sessions.some((session) => session.runId === selectedRunId)) {
@@ -6273,33 +6287,35 @@ const CLIENT_SCRIPT = String.raw`(() => {
       return true;
   }
 
-  async function loadProjectCatalog({ refresh = false } = {}) {
-    if (catalogRequestInFlight) return catalogAvailable;
-    catalogRequestInFlight = true;
-    try {
-      const requested = selectionFromLocation();
-      const catalogUrl = new URL(projectsEndpoint, window.location.href);
-      if (selectedProjectId || requested.projectId) catalogUrl.searchParams.set("projectId", selectedProjectId || requested.projectId);
-      if (selectedRunId || requested.runId) catalogUrl.searchParams.set("runId", selectedRunId || requested.runId);
-      const response = await fetch(catalogUrl.href, { headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error("project catalog request failed");
-      const catalog = normalizeCatalog(await response.json());
-      if (!catalog) throw new Error("project catalog unavailable");
-      return await applyProjectCatalog(catalog, { refresh });
-    } catch {
-      if (refresh && catalogAvailable) {
-        setHubStatus("Project catalog refresh paused · showing the last verified list");
-        return true;
-      }
-      catalogAvailable = false;
-      projectCatalog = [];
-      populateProjectSelect();
-      populateSessionSelect();
-      setHubStatus("Current project mode · global catalog unavailable");
-      return false;
-    } finally {
-      catalogRequestInFlight = false;
-    }
+  function loadProjectCatalog({ refresh = false, afterCurrent = false, catalogOnly = false } = {}) {
+    if (!catalogLoader) catalogLoader = createLiveProjectCatalogLoader({
+      read: async () => {
+        const requested = selectionFromLocation();
+        const catalogUrl = new URL(projectsEndpoint, window.location.href);
+        if (selectedProjectId || requested.projectId) catalogUrl.searchParams.set("projectId", selectedProjectId || requested.projectId);
+        if (selectedRunId || requested.runId) catalogUrl.searchParams.set("runId", selectedRunId || requested.runId);
+        const request = new AbortController();
+        const timer = window.setTimeout(() => request.abort(), 12000);
+        try {
+          const response = await fetch(catalogUrl.href, { headers: { accept: "application/json" }, cache: "no-store", signal: request.signal });
+          if (!response.ok) throw new Error("project catalog request failed");
+          const catalog = normalizeCatalog(await response.json());
+          if (!catalog) throw new Error("project catalog unavailable");
+          return catalog;
+        } finally { window.clearTimeout(timer); }
+      },
+      apply: applyProjectCatalog,
+      onError: () => {
+        if (catalogAvailable) {
+          setHubStatus("Project catalog refresh paused · showing the last verified list");
+          return;
+        }
+        populateProjectSelect();
+        populateSessionSelect();
+        setHubStatus("Current project mode · global catalog unavailable");
+      },
+    });
+    return catalogLoader.load({ refresh, afterCurrent, catalogOnly });
   }
 
   function showEmpty(message, title = "No live snapshot yet") {
@@ -6934,6 +6950,15 @@ const CLIENT_SCRIPT = String.raw`(() => {
   for (const panel of app.querySelectorAll(".share-panel, .control-panel")) infoTools?.append(panel);
   let workspaceConfig = { enabled: false };
   try { workspaceConfig = JSON.parse(workspaceConfigElement?.textContent || "null") || workspaceConfig; } catch {}
+  projectImportUi = createLiveProjectImportUi({
+    app, config: workspaceConfig, language: () => currentLanguage,
+    fetcher: (url, options) => fetch(url, options),
+    getCatalog: () => projectCatalog,
+    refreshCatalog: loadProjectCatalog,
+    selectProjectRun: (projectId, runId) => switchSelection(projectId, runId, { updateUrl: true }),
+    setDialogOpen: (open) => setDialogOpen(sessionsDialog, open),
+    onOpened: () => setDialogOpen(sessionsDialog, false),
+  });
   liveWorkspaceController = createLiveWorkspaceController({
     app, config: workspaceConfig, policy: LIVE_WORKSPACE_UI_POLICY,
     language: () => currentLanguage,
@@ -6941,10 +6966,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
     openProjects: () => setDialogOpen(sessionsDialog, true),
     getCatalog: () => projectCatalog,
     selectProjectRun: (projId, runId) => { void switchSelection(projId, runId || "", { updateUrl: true }); },
-    reloadCatalog: () => fetch(endpointForSelection("/api/projects", { includeRun: false }), { headers: { accept: "application/json" }, cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((cat) => (cat?.projects ? applyProjectCatalog(cat, { refresh: true }) : null))
-      .catch(() => null),
+    reloadCatalog: () => loadProjectCatalog({ refresh: true, afterCurrent: true }),
     openGraph: (nodeId) => {
       setWorkView("run", { persist: false });
       if (nodeId) { selectedNodeId = nodeId; updateSelectedNodeVisuals(); setInspectorOpen(true); }
@@ -6993,7 +7015,10 @@ const CLIENT_SCRIPT = String.raw`(() => {
         startedFromCatalog = false;
       }
     }
-    if (!startedFromCatalog) startedFromCatalog = await loadProjectCatalog();
+    if (!startedFromCatalog) {
+      const result = await loadProjectCatalog();
+      startedFromCatalog = result.ok && result.selected;
+    }
     else void loadProjectCatalog({ refresh: true });
     if (!startedFromCatalog && !catalogAvailable) {
       await loadSnapshot(false);
@@ -7017,6 +7042,7 @@ const CLIENT_SCRIPT = String.raw`(() => {
     }
     stopReplay();
     liveWorkspaceController?.dispose();
+    projectImportUi?.dispose();
     abortController?.abort();
     if (eventSource) eventSource.close();
   }, { once: true });
@@ -7765,6 +7791,31 @@ kbd { min-width: 28px; padding: var(--sp-hairline) var(--sp-tight); border: 1px 
 .edge[data-task-detail="blocked"], .edge[data-task-detail="cancelled"] { stroke: var(--amber); stroke-dasharray: 3 6; }
 .edge-effects[data-task-detail="failed"], .edge-effects[data-task-detail="blocked"], .edge-effects[data-task-detail="cancelled"] { visibility: hidden; }
 .edge[data-task-state][data-relation-focus="far"], .edge-effects[data-task-state][data-relation-focus="far"] { opacity: .22; }
+/* Manual import shares the existing dialog, dark tokens and focus boundary. */
+.shell [data-project-import-entry], .project-import-pane button { min-height: 44px; min-width: 44px; white-space: normal; }
+.project-import-pane button { padding: var(--sp-cozy) var(--sp-roomy); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font: inherit; font-size: var(--fs-body); }
+.project-import-pane [data-project-import-confirm] { background: var(--text); color: var(--ink); border-color: var(--text); font-weight: var(--weight-semibold); }
+.project-import-pane button:disabled { opacity: .5; cursor: not-allowed; }
+.shell [data-project-import-entry]:disabled { opacity: .55; cursor: not-allowed; }
+.shell [data-project-import-entry]:focus-visible, .project-import-pane :is(input, button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.project-import-pane { overflow-wrap: anywhere; }
+.project-import-pane h3 { margin-top: 0; }
+.project-import-pane p { color: var(--muted); line-height: var(--lh-normal); }
+.project-import-pane form { display: grid; gap: var(--sp-cozy); }
+.project-import-path-row { display: flex; flex-wrap: wrap; gap: var(--sp-cozy); }
+.project-import-path-row input { min-height: 44px; min-width: 0; flex: 1 1 240px; padding: var(--sp-cozy); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font: inherit; font-size: max(16px, var(--fs-body)); }
+.project-import-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--sp-cozy); padding: var(--sp-default); background: var(--panel-2); border-radius: var(--radius-sm); }
+.project-import-facts dt { color: var(--muted); }
+.project-import-facts dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.project-import-warning { border-left: 3px solid var(--amber); padding-left: var(--sp-default); }
+.project-import-consent { display: flex; align-items: center; gap: var(--sp-cozy); min-height: 44px; }
+.project-import-consent input { width: 22px; height: 22px; flex: 0 0 auto; }
+.project-import-actions { display: flex; flex-wrap: wrap; gap: var(--sp-default); }
+.project-import-pane [data-project-import-error] { color: var(--danger); }
+.shell:not([data-nav-collapsed="true"]) .topbar-actions > [data-project-import-entry] { display: none; }
+.uw-overview > [data-project-import-empty] { grid-column: 1; }
+@media (max-width: 767px) { .shell:not([data-nav-collapsed="true"]) .topbar-actions > [data-project-import-entry] { display: inline-flex; align-items: center; }.uw-navigation > [data-project-import-entry] { display: none; } }
+@media (max-width: 480px) { .topbar-actions [data-project-import-entry] { max-width: 12ch; font-size: var(--fs-micro); }.project-import-facts { grid-template-columns: minmax(0, 1fr); }.live-dialog:has(.project-import-pane:not([hidden])) { align-items: start; padding-top: var(--sp-default); }.live-dialog:has(.project-import-pane:not([hidden])) .dialog-card { max-height: calc(100dvh - 32px); } }
 @media (prefers-reduced-motion: reduce) { .edge-flow-particle, .edge-flow-tracer, .edge-flow-glow { display: none; } *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
 `;
 
@@ -7838,7 +7889,7 @@ export function renderLiveControlRoomPage({
       </div>
 
       <details class="work-view-menu"><summary class="topbar-button" data-i18n-en="Other views" data-i18n-zh="其他视图">其他视图</summary><div class="work-view-switcher" role="group" aria-label="Views and help"><div class="work-view-tabs" role="tablist" aria-label="Optional work surface views"><button class="work-view-tab" id="work-view-run" type="button" role="tab" aria-controls="run-view" aria-selected="true" data-live-work-view="run" data-i18n-en="Flow map" data-i18n-zh="流程图">流程图</button><button class="work-view-tab" id="work-view-workspace" type="button" role="tab" aria-controls="workspace-view" aria-selected="false" tabindex="-1" data-live-work-view="workspace" data-i18n-en="Workspace" data-i18n-zh="工作台">工作台</button><button class="work-view-tab" id="work-view-repository" type="button" role="tab" aria-controls="repository-view" aria-selected="false" tabindex="-1" data-live-work-view="repository" data-i18n-en="Repository" data-i18n-zh="仓库">仓库</button></div><div class="work-view-utilities" role="group" aria-label="Help and session information"><button class="topbar-button" type="button" data-live-open-help data-i18n-en="Help" data-i18n-zh="使用帮助">使用帮助</button><button class="topbar-button" type="button" data-live-open-info data-i18n-en="Session info" data-i18n-zh="运行信息">运行信息</button></div></div></details>
-      <div class="topbar-actions"><div class="connection" aria-live="polite"><span class="connection-dot" data-live-connection-dot aria-hidden="true"></span><span data-live-connection data-i18n-en="Connecting…" data-i18n-zh="正在连接…">正在连接…</span></div><button class="topbar-button" type="button" data-live-open-sessions data-i18n-en="Run records" data-i18n-zh="运行记录">运行记录</button><select class="topbar-button" data-live-language-select aria-label="Interface language"><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select><button class="topbar-button" type="button" data-live-open-help aria-label="Help" title="Help">?</button><button class="topbar-button" type="button" data-live-open-info aria-label="Session info" title="Session info">i</button></div>
+      <div class="topbar-actions"><div class="connection" aria-live="polite"><span class="connection-dot" data-live-connection-dot aria-hidden="true"></span><span data-live-connection data-i18n-en="Connecting…" data-i18n-zh="正在连接…">正在连接…</span></div><button class="topbar-button" type="button" data-live-open-sessions data-i18n-en="Run records" data-i18n-zh="运行记录">运行记录</button><button class="topbar-button project-import-entry" type="button" data-project-import-entry aria-describedby="project-import-availability" disabled><span data-project-import-copy="entry">＋ 导入项目</span></button><span class="sr-only" id="project-import-availability" data-project-import-availability>当前连接未开放项目导入。</span><select class="topbar-button" data-live-language-select aria-label="Interface language"><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select><button class="topbar-button" type="button" data-live-open-help aria-label="Help" title="Help">?</button><button class="topbar-button" type="button" data-live-open-info aria-label="Session info" title="Session info">i</button></div>
     </header>
     <nav class="uw-top-flow-ribbon" data-uw-top-flow aria-label="全局执行进度"></nav>
     ${renderLiveWorkspaceNavigation()}
@@ -7926,20 +7977,23 @@ export function renderLiveControlRoomPage({
         <header class="panel-header"><div><h2 class="panel-title" id="control-title" data-i18n-en="Continuation controls" data-i18n-zh="继续执行控制">继续执行控制</h2><p class="panel-note" data-i18n-en="Opt-in commands require explicit local capabilities and durable verification." data-i18n-zh="可选控制命令需要明确的本地能力与耐久验证。">可选控制命令需要明确的本地能力与耐久验证。</p></div><span class="panel-count" data-i18n-en="AUTHORITY-BOUND" data-i18n-zh="受权限约束">受权限约束</span></header>
         <div class="control-content"><div class="control-actions" data-live-control-actions>${safeControlConfig ? LIVE_CONTROL_ACTIONS.map((action) => `<button class="replay-button control-button" type="button" data-live-control-action="${action}" aria-label="${action[0].toUpperCase() + action.slice(1)} run">${action[0].toUpperCase() + action.slice(1)}</button>`).join("") : ""}</div><p class="control-status" data-live-control-status role="status" aria-live="polite" data-i18n-en="Controls are read-only until the local service declares every action available." data-i18n-zh="在本地服务明确声明所有操作可用前，控制功能保持只读。">在本地服务明确声明所有操作可用前，控制功能保持只读。</p><p class="control-result" data-live-control-result role="status" aria-live="polite"></p><p class="control-error" data-live-control-error role="alert" aria-live="assertive"></p></div>
       </section>
-      <section class="empty-state" data-live-empty hidden aria-labelledby="empty-title"><span class="empty-glyph" aria-hidden="true">${fixedUiIcon("inbox", "empty-state-icon")}</span><h2 class="empty-title" id="empty-title" data-i18n-en="No live snapshot yet" data-i18n-zh="尚无实时快照">尚无实时快照</h2><p class="empty-copy" data-live-empty-message>正在等待本地观察器发布运行快照。</p></section>
+      <section class="empty-state" data-live-empty hidden aria-labelledby="empty-title"><span class="empty-glyph" aria-hidden="true">${fixedUiIcon("inbox", "empty-state-icon")}</span><h2 class="empty-title" id="empty-title" data-i18n-en="No live snapshot yet" data-i18n-zh="尚无实时快照">尚无实时快照</h2><p class="empty-copy" data-live-empty-message>正在等待本地观察器发布运行快照。</p><div data-project-import-empty><button class="replay-button project-import-entry" type="button" data-project-import-entry aria-describedby="project-import-availability" disabled><span data-project-import-copy="entry">＋ 导入项目</span></button></div></section>
     </main>
     <section class="live-dialog" data-live-dialog data-live-sessions-dialog role="dialog" aria-modal="true" aria-labelledby="sessions-title" aria-hidden="true" hidden>
       <div class="dialog-card run-record-dialog">
         <header class="dialog-header"><h2 class="dialog-title" id="sessions-title" data-i18n-en="Run records" data-i18n-zh="运行记录">运行记录</h2><button class="graph-tool-button" type="button" data-live-dialog-close aria-label="Close run records">×</button></header>
         <div class="dialog-body">
+          ${renderLiveProjectImportPane()}
+          <div data-project-records-pane>
           <p class="run-record-guide" data-i18n-en="Find saved runs by project, title, or date. Open Details to check the chat link and run ID." data-i18n-zh="按项目、标题或日期查找运行；聊天关联和运行编号在“详情”中查看。">按项目、标题或日期查找运行；聊天关联和运行编号在“详情”中查看。</p>
           <section class="hub-switcher" aria-label="Meta_Kim project and run record selection">
-            <label class="hub-field" for="live-project-select"><span data-i18n-en="Project" data-i18n-zh="项目">项目</span><select class="hub-select" id="live-project-select" data-live-project-select aria-label="Choose a Meta_Kim project"><option value="">正在加载已登记项目…</option></select></label>
+            <label class="hub-field" for="live-project-select"><span data-i18n-en="Project" data-i18n-zh="项目">项目</span><select class="hub-select" id="live-project-select" data-live-project-select aria-label="Choose a Meta_Kim project"><option value="">正在加载已登记项目…</option></select></label><button class="replay-button project-import-entry" type="button" data-project-import-entry aria-describedby="project-import-availability" disabled><span data-project-import-copy="entry">＋ 导入项目</span></button>
             <label class="hub-field hub-search" for="live-session-search"><span data-i18n-en="Search title, date, or run ID" data-i18n-zh="搜索标题、日期或运行 ID">搜索标题、日期或运行 ID</span><input class="hub-select" id="live-session-search" data-live-session-search type="search" maxlength="120" autocomplete="off" placeholder="Search title, date, or run ID" data-i18n-placeholder-zh="搜索标题、日期或运行 ID"></label>
             <details class="hub-record-picker"><summary data-i18n-en="Choose by run ID" data-i18n-zh="按运行编号选择">按运行编号选择</summary><label class="hub-field" for="live-session-select"><span data-i18n-en="Current run record" data-i18n-zh="当前运行记录">当前运行记录</span><select class="hub-select" id="live-session-select" data-live-session-select aria-label="Choose a governed run record" disabled><option value="">请先选择项目</option></select></label></details>
             <p class="hub-status" data-live-hub-status role="status" aria-live="polite">正在加载本地项目目录…</p>
           </section>
           <div class="session-list" data-live-session-list role="list" aria-label="Governed run records"></div>
+          </div>
         </div>
       </div>
     </section>

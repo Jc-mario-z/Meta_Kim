@@ -1,4 +1,15 @@
 /** Korean product copy. Saved user tasks and logs are not translation inputs. */
+export const KO_PROJECT_IMPORT_COPY = Object.freeze({
+  entry: "＋ 프로젝트 가져오기", title: "로컬 프로젝트 가져오기", path: "이 기기의 절대 디렉터리 경로", placeholder: "절대 디렉터리 경로 입력",
+  help: "기존 프로젝트를 목록에만 등록합니다. 복사, 초기화, 설치, 작업 시작은 하지 않으며 Agent에 연결된 실행 디렉터리도 변경하지 않습니다.",
+  unavailable: "이 연결에서는 프로젝트 가져오기가 허용되지 않습니다. 쓰기 권한이 있는 로컬 작업 공간이 필요합니다.",
+  check: "확인", checking: "확인 중…", confirm: "가져와서 열기", open: "프로젝트 열기", confirming: "등록 확인 중…", refreshing: "목록 새로 고침 중…", retryOpen: "목록 새로 고침 후 열기", retryUnknown: "결과 확인 후 안전하게 재시도", cancel: "취소",
+  name: "프로젝트 이름", canonicalPath: "정규 경로", evidence: "거버넌스 기록 수", registration: "등록 상태", ready: "미등록 · 가져오기 가능", registered: "이미 등록됨",
+  skipped: "이 프로젝트는 이전에 목록에서 제외되었습니다. 다시 등록하려는 경우에만 선택하세요.", skippedConsent: "이 프로젝트를 다시 등록하는 데 동의합니다",
+  importedPending: "가져오기는 완료했지만 목록을 업데이트하지 못했습니다. 다시 등록하지 않고 새로 고침하여 열 수 있습니다.", unknown: "등록 결과를 확인할 수 없습니다. 먼저 목록을 확인하고 필요한 경우에만 동일한 확인 토큰으로 재시도합니다.",
+  invalidPath: "이 기기의 절대 디렉터리 경로를 입력하세요.", pathUnavailable: "디렉터리를 읽을 수 없습니다. 존재 여부와 접근 권한을 확인하세요.", notGoverned: "이 디렉터리에는 읽을 수 있는 Meta_Kim 거버넌스 기록이 없습니다.",
+  expired: "미리보기 유효 기간이 지났습니다. 다시 확인하세요.", stale: "확인 후 프로젝트 기록이 변경되었습니다. 다시 확인하세요.", skippedRequired: "이전에 제외한 프로젝트의 재등록에 동의해 주세요.", full: "프로젝트 목록 한도에 도달했습니다.", failed: "프로젝트를 가져오지 못했습니다. 입력을 유지했으니 확인 후 다시 시도하세요.", auth: "로컬 제어 권한이 만료되었습니다. 작업 공간에 다시 연결하세요.", request: "요청이 거부되었습니다. 페이지를 새로 고침하고 다시 확인하세요.", previewNetwork: "확인 서비스에 연결할 수 없습니다. 입력을 유지했으니 다시 시도하세요."
+});
 export const KO_COPY = Object.freeze({
   " / Output · ": " / 출력 · ",
   " / Total · ": " / 전체 · ",

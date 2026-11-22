@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { importDatabaseSync } from "../src/data/sqlite/runtime.mjs";
 import { withSqliteTransaction } from "../src/data/sqlite/transaction.mjs";
 
@@ -276,6 +277,33 @@ function upsertProjectRow(db, { repoPath, enrollmentStatus }) {
   return { projectRef, normalizedRepoPath, now };
 }
 
+/** Read enrollment and capacity without creating or repairing any registry. */
+export async function inspectProjectRegistry({ homeDir = os.homedir(), repoPath } = {}) {
+  const { projectRegistryPath } = getProjectRegistryPaths({ homeDir });
+  const unavailable = () => Object.assign(new Error("project_import_unavailable"), { code: "project_import_unavailable", status: 503 });
+  const stamp = async () => {
+    const info = await fs.stat(projectRegistryPath).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+    const wal = await fs.stat(`${projectRegistryPath}-wal`).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+    // SQLite's readOnly flag can create WAL/SHM files. immutable prevents that,
+    // but ignores WAL frames: never infer enrollment from an uncheckpointed DB.
+    if (wal?.size > 0) throw unavailable();
+    return info ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}` : null;
+  };
+  const before = await stamp();
+  if (!before) return { project: null, joinedProjectRefs: [] };
+  const DatabaseSync = await importDatabaseSync();
+  const db = new DatabaseSync(`${pathToFileURL(projectRegistryPath).href}?mode=ro&immutable=1`, { readOnly: true });
+  try {
+    const project = db.prepare(`SELECT project_ref AS projectRef, repo_root AS repoRoot,
+      display_name AS displayName, enrollment_status AS enrollmentStatus FROM projects WHERE project_ref = ?`)
+      .get(buildProjectRef({ repoPath }));
+    const joinedProjectRefs = db.prepare("SELECT project_ref FROM projects WHERE enrollment_status = 'joined'").all()
+      .map((row) => row.project_ref);
+    if (await stamp() !== before) throw unavailable();
+    return { project: project || null, joinedProjectRefs };
+  } finally { db.close(); }
+}
+
 export async function joinProjectRegistry({
   homeDir = os.homedir(),
   repoPath = process.cwd(),
@@ -283,11 +311,28 @@ export async function joinProjectRegistry({
   sourceType = "meta_architecture",
   sourceRef = "meta-kim-runtime",
   onWriteStep = null,
+  importPolicy = null,
 } = {}) {
   const { projectRegistryPath } = getProjectRegistryPaths({ homeDir });
   const db = await openProjectRegistry(projectRegistryPath);
   try {
-    const { projectRef } = withSqliteTransaction(db, () => {
+    const { projectRef, alreadyRegistered = false } = withSqliteTransaction(db, () => {
+      if (importPolicy) {
+        const reject = (code) => { throw Object.assign(new Error(code), { code }); };
+        if (!Number.isInteger(importPolicy.maxProjects) || importPolicy.maxProjects < 1 ||
+            !Array.isArray(importPolicy.reservedProjectRefs) || typeof importPolicy.previouslySkipped !== "boolean") {
+          throw new TypeError("Invalid project import transaction policy");
+        }
+        const ref = buildProjectRef({ repoPath });
+        const current = db.prepare("SELECT repo_root, enrollment_status FROM projects WHERE project_ref = ?").get(ref);
+        if (current && current.repo_root !== normalizeRepoPath(repoPath)) reject("project_import_preview_stale");
+        if ((current?.enrollment_status === "skipped") !== importPolicy.previouslySkipped) reject("project_import_preview_stale");
+        const refs = new Set(db.prepare("SELECT project_ref FROM projects WHERE enrollment_status = 'joined'").all().map((row) => row.project_ref));
+        for (const reserved of importPolicy.reservedProjectRefs) refs.add(reserved);
+        refs.add(ref);
+        if (refs.size > importPolicy.maxProjects) reject("project_import_catalog_full");
+        if (current?.enrollment_status === "joined") return { projectRef: ref, alreadyRegistered: true };
+      }
       const project = upsertProjectRow(db, {
         repoPath,
         enrollmentStatus: "joined",
@@ -329,6 +374,7 @@ export async function joinProjectRegistry({
       known: true,
       runtimeFamily,
       projectRegistryPath,
+      ...(importPolicy ? { alreadyRegistered } : {}),
     };
   } finally {
     db.close();
